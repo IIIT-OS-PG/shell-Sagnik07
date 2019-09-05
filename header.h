@@ -6,3 +6,6 @@
 #include<sys/wait.h>
 #include<unistd.h>
 #include<string>
+#include<pwd.h>
+#include<termios.h>
+#include<fcntl.h>
