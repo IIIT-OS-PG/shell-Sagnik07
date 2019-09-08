@@ -9,3 +9,5 @@
 #include<pwd.h>
 #include<termios.h>
 #include<fcntl.h>
+#include<algorithm>
+using namespace std;
