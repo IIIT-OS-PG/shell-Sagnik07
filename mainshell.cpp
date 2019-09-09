@@ -4,6 +4,9 @@ using namespace std;
 unordered_map<string,string> mp;
 unordered_map<string,string> mpassign;
 struct termios ttyorig;
+pid_t current_pid=0;
+int exitstatus=0;
+
 int cd(char **path)	{
 	
 	char path1[1000],cwd[1000];
@@ -52,6 +55,7 @@ void echocall(char **argv)	{
 			cout<<"\n";
 
 	}
+	current_pid=getpid();
 }
 
 void history(char *hist[],int hc)	{
@@ -73,6 +77,7 @@ void history(char *hist[],int hc)	{
 				cout<<i+1<<" "<<hist[i]<<"\n";
 		}
 	}
+	current_pid=getpid();
 }
 void print_prompt(string user,char hostname[])	{
 	char prompt[100];
@@ -88,6 +93,7 @@ void pipe1(string str)	{
 	char *command[1000];
 	char *token=strtok(ch,"|");
 	int j=0,i;
+	int exstatus;
 	while(token!=NULL)	{
 		command[j]=token;
 		token=strtok(NULL,"|");
@@ -96,7 +102,7 @@ void pipe1(string str)	{
 	command[j]=NULL;
 	pid_t pid1=fork();
 	if(pid1<0)	{
-		cout<<"Failed";
+		cout<<"Error";
 		exit(0);
 	}
 	if(pid1==0)	{
@@ -116,15 +122,16 @@ void pipe1(string str)	{
 			pid_t pid;
 			pid=fork();
 			if(pid<0)	{
-				cout<<"Failed";
+				cout<<"Error";
 				exit(0);
 			}
 			if(pid==0)	{
 				dup2(fd[1],1);
 				if(execvp(argv[0],argv)<0)	{
 					cout<<argv[0]<<": command not found\n";
-					//exit(0);
+					exit(0);
 				}
+				current_pid=getpid();
 			}
 			else
 				wait(NULL);
@@ -143,11 +150,13 @@ void pipe1(string str)	{
 		argv[k]=NULL;
 		if(execvp(argv[0],argv)<0)	{
 			cout<<argv[0]<<": command not found\n";
-			//exit(0);
+			exit(0);
 		}
+		current_pid=getpid();
 	}
-	else
+	else	{
 		wait(NULL);
+	}
 }
 
 
@@ -157,6 +166,7 @@ void io_redirection(string str,int i)	{
 	char *command[1000],*filename;
 	char *thiscommand=strtok(ch,">");
 	char *thiscommand1;
+	int exstatus;
 	if(i==1)	{	
 		while(thiscommand!=NULL)	{
 			filename=thiscommand;
@@ -185,6 +195,12 @@ void io_redirection(string str,int i)	{
 	}
 	command[j]=NULL;
 	
+	int h;
+	for(h=0;h<strlen(filename)-1;h++)							{
+		filename[h]=filename[h];
+	}
+	filename[h]='\0';
+
 	if(i==1)	{
 		fd=open(filename, O_CREAT|O_WRONLY|O_TRUNC,0666);		
 		dup2(fd,1);
@@ -196,23 +212,181 @@ void io_redirection(string str,int i)	{
 	pid_t pid;
 	pid=fork();
 	if(pid<0)	{
-		cout<<"Failed";
+		cout<<"Error";
 		exit(0);
 	}
 	if(pid==0)	{
 		if(execvp(command[0],command)<0)	{
 			cout<<command[0]<<": command not found\n";
-			//exit(0);
+			exit(0);
 		}
+		current_pid=getpid();
 	}
-	else
+	else	{
 		wait(NULL);
+	}
 	close(fd);
 	dup2(savedstdout,1);
 	close(savedstdout);
 
 }
 
+void pipe_and_redirect(string str,int red)	{
+	char ch[1000];
+	int point=0;
+	string filename="",s="";
+	strcpy(ch,str.c_str());
+	int exstatus;
+	pid_t pid2=fork();
+	if(pid2<0)	{
+		cout<<"Error";
+		exit(0);
+	}
+	if(pid2==0)	{
+		for(int x=0;x<str.length()-1;x++)	{
+			if(str[x]=='>')	{
+				if(str[x+1]=='>')	{
+					point=x+1;
+				}
+				else	{
+					point=x;
+				}
+				break;
+			}
+		}
+		str=str.substr(point+1);
+		char filename1[1000];
+		strcpy(filename1,str.c_str());
+		int h;
+		for(h=0;h<strlen(filename1)-1;h++)							{
+			filename1[h]=filename1[h];
+		}
+		filename1[h]='\0';
+		char *command[1000];
+		char *token=strtok(ch,"|");
+		int j=0,i,fdthis;
+		while(token!=NULL)	{
+			command[j]=token;
+			token=strtok(NULL,"|");
+			j++;
+		}
+		command[j]=NULL;
+		pid_t pid1=fork();
+		if(pid1<0)	{
+			cout<<"Error";
+			exit(0);
+		}
+		if(pid1==0)	{
+			for(i=0;i<j-1;i++)	{
+				char *token1=strtok(command[i]," ");
+				int k=0;
+				char *argv[1000];
+				while(token1!=NULL)	{
+					argv[k]=token1;
+					token1=strtok(NULL," ");
+					k++;
+				}
+				argv[k]=NULL;
+				int fd[2],in=0;
+				pipe(fd);
+
+				pid_t pid;
+				pid=fork();
+				if(pid<0)	{
+					cout<<"Error";
+					exit(0);
+				}
+				if(pid==0)	{
+					dup2(fd[1],1);
+					if(execvp(argv[0],argv)<0)	{
+						cout<<argv[0]<<": command not found\n";
+						//exit(0);
+					}
+					current_pid=getpid();
+				}
+				else
+					wait(NULL);
+				dup2(fd[0],0);
+				close(fd[1]);
+			}
+		
+		}
+		else
+			wait(NULL);
+
+		if(red==1)	{
+			fdthis=open(filename1, O_CREAT|O_WRONLY|O_TRUNC,0666);		
+			dup2(fdthis,1);
+		}
+		else if(red==2)	{
+			fdthis=open(filename1,O_APPEND|O_WRONLY,0666);
+			dup2(fdthis,1);
+		}
+
+		for(int x=0;x<strlen(command[i]);x++)	{
+			if(command[i][x]!='>')	{
+				s=s+command[i][x];
+			}
+			else
+				break;
+		}
+		char comm[1000];
+		strcpy(comm,s.c_str());
+		char *token1=strtok(comm," ");
+		char *argv[1000];
+		int k=0;
+		while(token1!=NULL)	{
+			argv[k]=token1;
+			token1=strtok(NULL," ");
+			k++;
+		}
+		argv[k]=NULL;
+		
+		if(execvp(argv[0],argv)<0)	{
+			cout<<argv[0]<<": command not found\n";
+			exit(0);
+		}
+		current_pid=getpid();
+	
+		close(fdthis);
+	}
+	else	{
+		wait(NULL);
+	}
+}
+
+void exportfunc(string str,int exportpoint)	{
+	char ch[1000];
+	strcpy(ch,str.c_str());
+	char *command[1000];
+	char *token=strtok(ch,"=");
+	int j=0,i;
+	while(token!=NULL)	{
+		command[j]=token;
+		token=strtok(NULL,"=");
+		j++;
+	}
+	command[j]=NULL;
+	string orgcommand1="";
+	string orgcommand(command[1]);
+	for(i=0;i<orgcommand.length();i++)	{
+		if(orgcommand[i]!='\"')
+			orgcommand1+=orgcommand[i];
+	}
+
+	string exportcommand(command[0]);
+	exportcommand=exportcommand.substr(exportpoint+1);
+	ofstream file2;
+	file2.open(".shellrc",ios::app);	
+	file2 << exportcommand << " " << orgcommand << endl;
+	file2.close();
+	char exportcommand2[1000],orgcommand2[1000];
+	strcpy(exportcommand2,exportcommand.c_str());
+	strcpy(orgcommand2,orgcommand.c_str());
+ 	setenv(exportcommand2,orgcommand2,1);
+
+	mp[exportcommand]=orgcommand1;
+}
 
 void aliasfunc(string str,int aliaspoint)	{
 	char ch[1000];
@@ -263,8 +437,8 @@ string check(string str)	{
 
 	return newstring;
 }
+
 string echocheck(string str)	{
-	//cout<<"str in func: "<<str<<endl;
 	string s="",newstring="";
 	str+=" ";
 	int i=0,echopoint=0,echoflag=1;
@@ -327,25 +501,54 @@ int main()	{
 	struct passwd *p;
 	if((p=getpwuid(uid=getuid()))==NULL)
 		cout<<"Error!";
-	//cout<<"name: "<<p->pw_name<<endl;
-	//cout<<"uid: "<<p->pw_uid<<endl;
-	//cout<<"dir: "<<p->pw_dir<<endl;
-	//cout<<"name: "<<p->pw_name<<endl;
 	
 	char hostbuffer[1000];
 	int hostname;
 	hostname=gethostname(hostbuffer,sizeof(hostbuffer));
-	//cout<<"Hostname: "<<hostbuffer<<endl;
 	setenv("HOSTNAME",hostbuffer,1);
 	setenv("USER",p->pw_name,1);
 	setenv("HOME",p->pw_dir,1);
+
+	int hf=1,uf=1,homef=1,ps1f=1;
+	ifstream file1;
+	file1.open(".shellrc");
+	string word1;
+	while(file1>>word1)	{
+		char word[1000];
+		strcpy(word,word1.c_str());
+		if(strcmp(word,"HOSTNAME")==0)	{
+			hf=0;
+		}
+		if(strcmp(word,"USER")==0)
+			uf=0;
+		if(strcmp(word,"HOME")==0)
+			homef=0;
+		if(strcmp(word,"PS1")==0)
+			ps1f=0;
+	}
+	file1.close();
+	ofstream file2;
+	file2.open(".shellrc",ios::app);
+	if(hf==1)	{
+		file2 << "HOSTNAME " << hostbuffer << endl;
+	}
+	if(uf==1)	
+		file2 << "USER " << p->pw_name << endl;
+	if(homef==1)	
+		file2 << "HOME " << p->pw_dir << endl;
+	if(ps1f==1)	
+		file2 << "PS1 " << p->pw_name << "@" << hostbuffer << endl;
+	file2.close();
+
+
 	char *hist[1000];
 	int hc=0;
 	for(int i=0;i<100;i++)
 		hist[i]=NULL;
-	
+	int recordflag=0;
 	cout<<"***Welcome to my shell***\n";
 	while(1)	{
+		
 		print_prompt(p->pw_name,hostbuffer);
 		char ch[100];
 		
@@ -366,8 +569,10 @@ int main()	{
 					break;
 				}
 				if((int)c==127)	{
-					str1.erase(str1.begin()+str1.length()-1);
-					cout<<"\b \b";
+					if(str1.length()>0)	{
+						str1.erase(str1.begin()+str1.length()-1);
+						cout<<"\b \b";
+					}
 				}
 				if((int)c==27)	{
 					c=getchar();
@@ -396,10 +601,9 @@ int main()	{
 		hist[hc]=strdup(ch);
 		hc=(hc+1)%1000;			
 
-
 		char *token=strtok(ch," ");
 
-		int flagio=0,pipeflag=0,aliaspoint=0,aliasflag=0,assignmentflag=0;
+		int flagio=0,pipeflag=0,aliaspoint=0,aliasflag=0,assignmentflag=0,exportflag=0;
 		string var="",word="";	
 	
 		while(token!=NULL)	{
@@ -408,6 +612,9 @@ int main()	{
 			if(strcmp(token,"alias")==0)	
 				aliasflag=1;
 
+			if(strcmp(token,"export")==0)	
+				exportflag=1;
+
 			token=strtok(NULL," ");
 			j++;
 		}
@@ -415,7 +622,7 @@ int main()	{
 		
 		
 		for(int x=0;x<str.length();x++)	{
-			if(str[x]=='=' && aliasflag==0)	{
+			if(str[x]=='=' && aliasflag==0 && exportflag==0)	{
 				assignmentflag=1;
 				var=word;
 				word="";
@@ -439,13 +646,31 @@ int main()	{
 			mpassign[var]=word;
 			continue;
 		}
+		if(exportflag==1)	{
+			if(str[7]=='\0')	{
+				ifstream file3;
+				file3.open(".shellrc");
+				string word2;
+				count=1;
+				while(file3>>word2)	{
+					if(count%2 !=0)
+						cout<<"declare -x "<<word2<<"=";
+					else
+						cout<<"\""<<word2<<"\"\n";
+					count=(count+1)%2;				
+				}
+				file3.close();
+			}
+			else
+				exportfunc(str,6);
+			continue;
+		}
 
 		if(aliasflag==1)	{
 			if(str[6]=='\0')	{
-				//cout<<"Here!"<<endl;
 				if(!mp.empty())	{
 					for(auto it=mp.begin();it!=mp.end();it++)	{
-						cout<<"alias "<<it->first<<"='"<<it->second<<"'"<<endl;
+						cout<<"alias "<<it->first<<"='"<<it->second<<"\'"<<endl;
 					}
 				}
 				else 
@@ -456,19 +681,29 @@ int main()	{
 			continue;
 		}
 
-		if(flagio==2)	{
+		if(flagio==2 && pipeflag==0)	{
 			io_redirection(str,2);
 			continue;
 		}
 
-		if(flagio==1)	{
+		if(flagio==1 && pipeflag==0)	{
 			io_redirection(str,1);
 			continue;
 		}
 
 				
 		if(pipeflag==1)	{
-			pipe1(str);			
+			if(flagio==2)	{
+				pipe_and_redirect(str,2);
+				continue;
+			}
+
+			else if(flagio==1)	{
+				pipe_and_redirect(str,1);
+				continue;
+			}
+			else
+				pipe1(str);			
 			continue;
 		}
 
@@ -481,11 +716,20 @@ int main()	{
 			if(cd(argv)<0)	{
 				cout<<"shell: cd: "<<argv[1]<<": No such file or directory\n";
 			}
+			current_pid=getpid();
 			continue;		
 		}
 
 		if(strcmp(argv[0],"echo")==0)	{
-			if(argv[1][0]=='$') { 
+			if((argv[1][0]=='$') && (argv[1][1]=='$'))	{
+				cout<<current_pid<<"\n";
+				continue;
+			}
+			if((argv[1][0]=='$') && (argv[1][1]=='?'))	{
+				cout<<exitstatus<<"\n";
+				continue;
+			}
+			else if(argv[1][0]=='$') { 
 				echocall(argv);	
 				continue;
 			}		
@@ -495,7 +739,7 @@ int main()	{
 		if(strcmp(argv[0],"exit")==0)
 			exit(0);
 
-		
+		int exstatus;
 		pid=fork();
 		if(pid<0)	{
 			cout<<"Failed";
@@ -504,8 +748,9 @@ int main()	{
 		if(pid==0)	{
 			if(execvp(argv[0],argv)<0)	{
 				cout<<argv[0]<<": command not found\n";
-				//exit(0);
+				exit(0);
 			}
+			current_pid=getpid();
 		}
 		else	{
 			wait(NULL);
@@ -513,21 +758,3 @@ int main()	{
 	}
 	return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
